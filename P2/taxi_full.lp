@@ -16,7 +16,7 @@ building(2,1). building(2,7).
 station(1,8). station(2,4).
 
 % si se pone el always aquí  se queda en solving, no entiendo por que
-
+#program always.
 
 % Datos de la instancia (Agentes)
 init(passenger,a,0,4).
