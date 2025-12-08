@@ -1,103 +1,259 @@
-% --- STATIC KNOWLEDGE (ALWAYS AVAILABLE) ---
+% % ======================================
+% % ALWAYS: dominio estático 4x9, objetos
+% % ======================================
+
 #program always.
 
-% Movimientos relativos (fila, columna)
-dir(u, -1, 0).
-dir(d, 1, 0).
-dir(l, 0, -1).
-dir(r, 0, 1).
+% % Celdas 4x9: filas 0..3, columnas 0..8
+% cell(R,C) :- R = 0..3, C = 0..8.
 
-% Definimos los agentes basados en el init
-% Al ponerlo en #program always, estas verdades existen en todos los pasos de tiempo
-is_taxi(T) :- init(taxi, T, _, _).
-is_passenger(P) :- init(passenger, P, _, _).
-building(R,C) :- building(R,C).
-station(R,C) :- station(R,C).
-cell(R,C) :- cell(R,C).
+% % Edificios
+% building(1,1). building(1,2). building(1,3). building(1,4).
+% building(1,5). building(1,6). building(1,7).
+% building(2,1). building(2,7).
 
-% --- INITIAL STATE ---
-#program initial.
+% % Taxis y pasajeros
+% taxi(1).  taxi(2).
+% passenger(a). passenger(b).
 
-% Posicion inicial de taxis
-at(T, R, C) :- init(taxi, T, R, C).
+% % Estaciones
+% station(2,4).
+% station(1,8).
 
-% Posicion inicial de pasajeros
-at(P, R, C) :- init(passenger, P, R, C).
+% % Direcciones de movimiento
+% dir(u,-1, 0).
+% dir(d, 1, 0).
+% dir(l, 0,-1).
+% dir(r, 0, 1).
 
-% --- DYNAMIC STATE ---
+% Definir opuestos (para optimización 2)
+opp(u,d). opp(d,u). opp(l,r). opp(r,l).
+
+
+% % =========================
+% % INITIAL: estado t = 0
+% % =========================
+
+% #program initial.
+
+% % Posiciones iniciales de taxis
+% at(1,2,0).
+% at(2,3,6).
+
+% % Posiciones iniciales de pasajeros
+% at(a,0,4).
+% at(b,0,6).
+
+% on_board(P,T) es falso por defecto (taxis vacíos)
+
+
+% =========================
+% DYNAMIC: acciones y efectos
+% =========================
+
 #program dynamic.
 
-% 1. GENERACION DE ACCIONES
-% Cada taxi debe realizar exactamente una accion por turno
-1 { o(move(T,D)) : dir(D,_,_); o(pick(T)); o(drop(T)); o(wait(T)) } 1 :- is_taxi(T).
+% -------------------------
+% Generador de acciones
+% -------------------------
 
-% 2. EFECTOS DE MOVIMIENTO
-% Calcular destino potencial
-dest(T, R+DR, C+DC) :- o(move(T,D)), 'at(T, R, C), dir(D, DR, DC).
+% Cada taxi hace EXACTAMENTE una acción por paso
+1 {
+    move(T,D) : dir(D,_,_);
+    pick(T);
+    drop(T);
+    wait(T)
+} 1 :- taxi(T).
 
-% Efecto: El taxi esta en el destino si se mueve
-at(T, R, C) :- dest(T, R, C).
+% -------------------------
+% Movimiento de los taxis
+% -------------------------
 
-% Restriccion: No moverse fuera del mapa
-:- dest(T, R, C), not cell(R, C).
+% Celda objetivo de un taxi si se mueve
+target(T,R2,C2) :-
+    move(T,D),
+    'at(T,R1,C1),
+    dir(D,DR,DC),
+    R2 = R1 + DR,
+    C2 = C1 + DC.
 
-% Restriccion: No moverse a un edificio
-:- dest(T, R, C), building(R, C).
+% No salirse del mapa
+:- target(T,R,C), not cell(R,C).
 
-% 3. EFECTOS DE PICK (Recoger)
-% Efecto: El pasajero esta a bordo del taxi T
-on_board(P, T) :- o(pick(T)), 'at(T, R, C), 'at(P, R, C).
+% No entrar en edificios
+:- target(T,R,C), building(R,C).
 
-% Restriccion Pick: No recoger si no hay pasajero
-:- o(pick(T)), 'at(T, R, C), not 'at(_, R, C).
+% Efecto del movimiento
+at(T,R,C) :- target(T,R,C).
 
-% Restriccion Pick: Un taxi solo puede llevar un pasajero a la vez
-% Si ya tenia alguien a bordo, no puede hacer pick
-:- o(pick(T)), 'on_board(_, T).
+% Flag: taxi T se ha movido en este paso
+moved(T) :- move(T,_).
 
-% 4. EFECTOS DE DROP (Dejar)
-% Efecto: El pasajero esta en la posicion actual del taxi
-at(P, R, C) :- o(drop(T)), 'at(T, R, C), 'on_board(P, T).
+% Inercia de posición de taxis:
+% si T no se mueve, se queda donde estaba
+at(T,R,C) :-
+    'at(T,R,C),
+    taxi(T),
+    not moved(T).
 
-% Restriccion Drop: No hacer drop si no lleva a nadie
-:- o(drop(T)), not 'on_board(_, T).
+% -------------------------
+% PICK (coger pasajero)
+% -------------------------
 
-% 5. INERCIA (Frame Axioms)
-c_at(Obj) :- o(drop(_)), 'on_board(Obj, _).
-c_at(T) :- o(move(T,_)).
-c_at(P) :- o(pick(_)), 'at(P,_,_).
-c_board(P) :- o(drop(_)), 'on_board(P,_).
-c_board(P) :- o(pick(_)), 'at(P,_,_).
+% Pasajero y taxi juntos en el estado anterior
+can_pick(T) :-
+    taxi(T),
+    passenger(P),
+    'at(T,R,C),
+    'at(P,R,C),
+    not 'on_board(P,T),
+    not 'on_board(_,T).   % taxi estaba vacío
 
-% Reglas de persistencia
-at(Obj, R, C) :- 'at(Obj, R, C), not c_at(Obj).
-on_board(P, T) :- 'on_board(P, T), not c_board(P).
+% Precondición: no se puede pick(T) si no hay pasajero adecuado
+:- pick(T), not can_pick(T).
 
-% --- CONSTRAINTS (Restricciones del Problema) ---
+% Efecto: pasajero P pasa a estar dentro de T
+on_board(P,T) :-
+    pick(T),
+    passenger(P),
+    'at(T,R,C),
+    'at(P,R,C).
 
-% 1. Colision de Taxis
-:- at(T1, R, C), at(T2, R, C), T1 < T2, is_taxi(T1), is_taxi(T2).
+% -------------------------
+% DROP (soltar pasajero)
+% -------------------------
 
-% 2. Colision de Humanos (Pasajeros o Taxi con pasajero)
-human_at(R, C) :- at(P, R, C), is_passenger(P).
-human_at(R, C) :- at(T, R, C), on_board(_, T).
+% Precondición: no se puede drop(T) si no llevaba a nadie
+:- drop(T), not 'on_board(_,T).
 
-:- human_at(R, C), #count{X : at(X, R, C), is_passenger(X); Y : at(Y, R, C), on_board(_, Y)} > 1.
+% Efecto: pasajero aparece en la casilla del taxi
+at(P,R,C) :-
+    drop(T),
+    'on_board(P,T),
+    'at(T,R,C).
 
-% Colision especifica: Taxi cargado entrando en celda con pasajero
-:- at(T, R, C), on_board(_, T), at(P, R, C), is_passenger(P).
+% -------------------------
+% Inercia de pasajeros
+% -------------------------
 
-% 3. Intercambio (Swap)
-:- o(move(T1, r)), o(move(T2, l)), 'at(T1, R, C), 'at(T2, R, C+1).
-:- o(move(T1, d)), o(move(T2, u)), 'at(T1, R, C), 'at(T2, R+1, C).
+% Un pasajero cambia de posición si sube o baja
+changed_pos(P) :- pick(T),  passenger(P), 'at(P,R,C), 'at(T,R,C).
+changed_pos(P) :- drop(T), 'on_board(P,T).
 
-% --- GOAL STATE ---
+% Inercia de posición de pasajeros en el suelo
+at(P,R,C) :-
+    'at(P,R,C),
+    passenger(P),
+    not changed_pos(P).
+
+% Cambio del estado "a bordo"
+changed_board(P) :- pick(T),  passenger(P), 'at(P,R,C), 'at(T,R,C).
+changed_board(P) :- drop(T), 'on_board(P,T).
+
+% Inercia de on_board
+on_board(P,T) :-
+    'on_board(P,T),
+    not changed_board(P).
+
+
+% =========================
+% RESTRICCIONES
+% =========================
+
+% 1) Dos taxis no pueden estar en la misma celda
+:- at(T1,R,C), at(T2,R,C),
+   taxi(T1), taxi(T2), T1 < T2.
+
+% 2) Personas en celdas:
+%    - pasajero en el suelo
+%    - taxi con alguien dentro
+has_person(R,C) :- at(P,R,C), passenger(P).
+has_person(R,C) :- at(T,R,C), taxi(T), on_board(_,T).
+
+% No puede haber dos personas en la misma celda
+:- has_person(R,C),
+   #count {
+     P : at(P,R,C), passenger(P);
+     T : at(T,R,C), taxi(T), on_board(_,T)
+   } > 1.
+
+% 3) Prohibir swap de taxis contiguos
+
+% Horizontal: T1 en (R,C), T2 en (R,C+1), se cruzan
+:- move(T1,r), move(T2,l),
+   'at(T1,R,C), 'at(T2,R,C+1),
+   taxi(T1), taxi(T2), T1 < T2.
+
+% Vertical: T1 en (R,C), T2 en (R+1,C), se cruzan
+:- move(T1,d), move(T2,u),
+   'at(T1,R,C), 'at(T2,R+1,C),
+   taxi(T1), taxi(T2), T1 < T2.
+
+% =========================
+% Restricción Temporal usando &tel y constraints
+%    "Es ilegal hacer picking(P,T) ahora, si PREVIAMENTE (<) ocurrió ALGUNA VEZ (<?) picking(P,T)"
+picking(P,T) :- 
+    pick(T), 
+    passenger(P), 
+    'at(T,R,C), 
+    'at(P,R,C).
+
+% 1. Predicado de Memoria: picked_before(P,T)
+% Significado: Es verdad si el par (P,T) fue recogido en algún paso anterior.
+
+% Caso A: Lo acabamos de recoger en el estado inmediatamente anterior
+picked_before(P,T) :- 'picking(P,T).
+
+% Caso B: Persistencia (Si ya lo habíamos recogido antes, seguimos recordándolo)
+picked_before(P,T) :- 'picked_before(P,T).
+
+% Restricción
+% No se puede recoger (picking) a alguien si ya figura como "recogido antes" (picked_before)
+:- picking(P,T), picked_before(P,T).
+
+% 2. Restricción Temporal usando &tel
+%    "Es ilegal hacer picking(P,T) ahora, si PREVIAMENTE (<) ocurrió ALGUNA VEZ (<?) picking(P,T)"
+% :- picking(P,T), &tel { < <? picking(P,T) }.
+
+% =========================
+% OTRA OPTIMIZACIÓN (2)
+
+% Restricción: No hacer un movimiento D si en el paso anterior (<) hiciste el opuesto (OD)
+% Se lee: Es ilegal mover T hacia D si antes te moviste hacia OD y OD es opuesto a D.
+% No siempre sirve para optimizar, ya que a veces esquivar otro taxi es necesario. No cuenta como paso
+% si recoge o suelta a alguien por el medio o si espera.
+:- move(T, D), opp(D, OD), &tel { < move(T, OD) }.
+
+% OPTIMIZACIÓN 3: Espera justificada
+% Un taxi solo puede hacer wait(T) si tiene un taxi adyacente
+% (Si está solo en el campo, debería moverse, no esperar).
+
+adj_taxi(T) :- taxi(T), taxi(T2), T != T2,
+               'at(T,R1,C1), 'at(T2,R2,C2),
+               |R1-R2| + |C1-C2| == 1.
+
+% Prohibido esperar si NO tienes un taxi adyacente
+:- wait(T), not adj_taxi(T).
+
+
+% =========================
+% FINAL: objetivo
+% =========================
+
 #program final.
 
-% Definimos condicion de exito para cada pasajero
-goal(P) :- at(P, R, C), station(R, C).
+% Un pasajero ha terminado si está en estación y fuera de taxi
+finished(P) :-
+    passenger(P),
+    at(P,R,C),
+    station(R,C),
+    not on_board(P,_).
 
-% El objetivo global es que no falte ningun pasajero por llegar
-:- is_passenger(P), not goal(P).
+% Objetivo: todos los pasajeros terminan
+:- passenger(P), not finished(P).
 
-#show o/1.
+% Mostrar solo acciones
+#show move/2.
+#show pick/1.
+#show drop/1.
+#show wait/1.

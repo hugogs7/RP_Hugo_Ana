@@ -84,7 +84,7 @@ f = open(sys.argv[1], "r"); domain = f.readlines(); f.close()
 f = open(sys.argv[2], "r"); solution = f.readlines(); f.close()
 n=len(domain)
 for i in range(n):
-    domain[i]=list(domain[i][:-1])
+    domain[i]=list(domain[i].rstrip('\n'))
 m=len(domain[0])
 person_at = [[' ' for i in range(m)] for j in range(n)]
 taxi_at   = [[' ' for i in range(m)] for j in range(n)]
@@ -113,6 +113,7 @@ while i<len(solution) and not (words!=[] and words[0]=='State'): words=solution[
 ## Processing the solution file
 for l in solution[i:]:
     words=l.split()
+    if len(words) == 0: continue   # <--- AÑADE ESTA LÍNEA AQUÍ
     if words[0]=='State': 
         if step!=[]: plan.append(step); step=[]
     else: step=step+words
